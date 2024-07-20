@@ -1,0 +1,5 @@
+mkdir eternal_health
+cd eternal_health
+python3 -m venv venv
+source venv/bin/activate
+pip install Flask Flask-SQLAlchemy Flask-JWT-Extended

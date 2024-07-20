@@ -1,0 +1,153 @@
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///eternal_health.db'
+app.config['JWT_SECRET_KEY'] = 'your_jwt_secret_key'
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(150), nullable=False)
+    mood = db.Column(db.String(150), nullable=True)
+    streak = db.Column(db.Integer, default=0)
+
+class Meditation(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    duration = db.Column(db.Integer, nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+
+class Reminder(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    reminder_type = db.Column(db.String(150), nullable=False)
+    time = db.Column(db.String(50), nullable=False)
+
+class PeriodTracker(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    start_date = db.Column(db.String(50), nullable=False)
+    end_date = db.Column(db.String(50), nullable=False)
+
+class FitnessBlog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(150), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+
+class NutritionChart(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    food_item = db.Column(db.String(150), nullable=False)
+    calories = db.Column(db.Integer, nullable=False)
+    proteins = db.Column(db.Integer, nullable=False)
+    fats = db.Column(db.Integer, nullable=False)
+    carbs = db.Column(db.Integer, nullable=False)
+
+db.create_all()
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    new_user = User(email=data['email'], password=data['password'])
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message': 'User registered successfully'}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    user = User.query.filter_by(email=data['email']).first()
+    if not user or user.password != data['password']:
+        return jsonify({'error': 'Invalid credentials'}), 401
+    access_token = create_access_token(identity=user.id)
+    return jsonify({'access_token': access_token}), 200
+
+@app.route('/meditations', methods=['GET'])
+@jwt_required()
+def get_meditations():
+    meditations = Meditation.query.all()
+    return jsonify([{'id': m.id, 'name': m.name, 'duration': m.duration, 'description': m.description} for m in meditations])
+
+@app.route('/track_meditation', methods=['POST'])
+@jwt_required()
+def track_meditation():
+    data = request.get_json()
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    user.streak += 1
+    db.session.commit()
+    return jsonify({'message': 'Meditation tracked successfully', 'streak': user.streak}), 201
+
+@app.route('/mood', methods=['POST'])
+@jwt_required()
+def update_mood():
+    data = request.get_json()
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    user.mood = data['mood']
+    db.session.commit()
+    return jsonify({'message': 'Mood updated successfully'}), 200
+
+@app.route('/suggestions', methods=['GET'])
+@jwt_required()
+def get_suggestions():
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    mood = user.mood
+    if mood == 'stressed':
+        suggestions = Meditation.query.filter(Meditation.duration <= 10).all()
+    elif mood == 'relaxed':
+        suggestions = Meditation.query.filter(Meditation.duration > 10).all()
+    else:
+        suggestions = Meditation.query.all()
+    return jsonify([{'id': s.id, 'name': s.name, 'duration': s.duration, 'description': s.description} for s in suggestions])
+
+@app.route('/reminders', methods=['POST'])
+@jwt_required()
+def add_reminder():
+    data = request.get_json()
+    user_id = get_jwt_identity()
+    new_reminder = Reminder(user_id=user_id, reminder_type=data['reminder_type'], time=data['time'])
+    db.session.add(new_reminder)
+    db.session.commit()
+    return jsonify({'message': 'Reminder added successfully'}), 201
+
+@app.route('/reminders', methods=['GET'])
+@jwt_required()
+def get_reminders():
+    user_id = get_jwt_identity()
+    reminders = Reminder.query.filter_by(user_id=user_id).all()
+    return jsonify([{'id': r.id, 'reminder_type': r.reminder_type, 'time': r.time} for r in reminders])
+
+@app.route('/period_tracker', methods=['POST'])
+@jwt_required()
+def add_period():
+    data = request.get_json()
+    user_id = get_jwt_identity()
+    new_period = PeriodTracker(user_id=user_id, start_date=data['start_date'], end_date=data['end_date'])
+    db.session.add(new_period)
+    db.session.commit()
+    return jsonify({'message': 'Period tracked successfully'}), 201
+
+@app.route('/period_tracker', methods=['GET'])
+@jwt_required()
+def get_periods():
+    user_id = get_jwt_identity()
+    periods = PeriodTracker.query.filter_by(user_id=user_id).all()
+    return jsonify([{'id': p.id, 'start_date': p.start_date, 'end_date': p.end_date} for p in periods])
+
+@app.route('/fitness_blog', methods=['GET'])
+def get_fitness_blog():
+    blogs = FitnessBlog.query.all()
+    return jsonify([{'id': b.id, 'title': b.title, 'content': b.content} for b in blogs])
+
+@app.route('/nutrition_chart', methods=['GET'])
+def get_nutrition_chart():
+    chart = NutritionChart.query.all()
+    return jsonify([{'id': n.id, 'food_item': n.food_item, 'calories': n.calories, 'proteins': n.proteins, 'fats': n.fats, 'carbs': n.carbs} for n in chart])
+
+if __name__ == '__main__':
+    app.run(debug=True)
